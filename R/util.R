@@ -991,3 +991,88 @@ filterbycells <- function(cn, cells){
   
   return(cn)
 }
+
+#' @export
+convertchiselcalls <- function(chisel, mirrorbaf = FALSE, library = NULL, sample = NULL){
+  
+  chisel$chr <- as.character(chisel$chr)
+  
+  #split the HAP_CN column to get the Maj and Min states and add the states in schnapps format
+  chisel <- chisel %>% 
+    dplyr::rename(chr = `#CHR`, start = START, end = END, cell_id = CELL, alleleA = A_COUNT, alleleB = B_COUNT, rdr = RDR) %>% 
+    tidyr::separate(CORRECTED_HAP_CN, c("Maj", "Min"), sep="([a|b])", convert = TRUE) %>% 
+    dplyr::mutate(start = start + 1, state = Maj + Min) %>% 
+    dplyr::select(-CLUSTER, -HAP_CN, -NORM_COUNT, -COUNT) %>% 
+    add_states(.)
+  
+  #calculate cell ploidy and convert rdr to corrected read counts: "copy"
+  chisel <- chisel %>% 
+    dplyr::group_by(cell_id) %>% 
+    dplyr::mutate(copy = rdr * 2) %>%
+    dplyr::mutate(pl = max(Mode(state), 2)) %>% 
+    dplyr::mutate(copy = as.double(copy * (pl / 2))) %>%
+    dplyr::ungroup() %>% 
+    dplyr::select(-pl)
+  
+  #mirror the BAF 
+  if (mirrorbaf){
+    chisel <- chisel %>%
+      dplyr::mutate(mBAF = BAF) %>%
+      dplyr::mutate( BAF = 
+                  dplyr::case_when(
+                  alleleA > alleleB & Maj < Min ~ (1-BAF), 
+                  alleleA > alleleB & Maj > Min ~ BAF, 
+                  alleleA < alleleB & Maj > Min ~ (1-BAF), 
+                  alleleA < alleleB & Maj < Min ~ BAF, 
+                  Maj == Min ~ BAF, 
+                  alleleA == alleleB ~ BAF, 
+                  TRUE ~ BAF
+                ) 
+      )
+  }
+  
+  if (is.null(library)){
+    library <- "library"
+  }
+  
+  if (is.null(library)){
+    sample <- "sample"
+  }
+  
+  chisel$cell_id <- unlist(lapply(chisel$cell_id, function(x) paste(sample, library, x, sep = "-")))
+  
+  return(chisel)
+}
+
+#' @export
+convertchiselhaplotypes <- function(chiselhaplotypes, hapbinsize = 50e3, cnbinsize = 500e3){
+  colnames(chiselhaplotypes) <- c("chr", "pos", "cell_id", "allele0", "allele1")
+  chiselhaplotypes$chr <- as.character(chiselhaplotypes$chr)
+  chiselhaplotypes$pos2 <- chiselhaplotypes$pos
+  
+  bins <- getBins(binsize = binsize) %>% 
+    dplyr::rename(start_bins = start, end_bins = end, chr_bins = chr) %>% 
+    dplyr::select(-width) %>% 
+    as.data.table() %>% 
+    .[, hap_label := 1:.N] 
+  
+  chiselhaplotypes <- chiselhaplotypes[bins, on = .(chr == chr_bins, pos > start_bins, pos < end_bins)]
+  chiselhaplotypes <- na.omit(chiselhaplotypes)
+  
+  chiselhaplotypes <-  chiselhaplotypes[, start := floor(pos / cnbinsize) * cnbinsize + 1] %>%
+    .[, end := start + cnbinsize - 1] %>%
+    .[, lapply(.SD, sum), by = .(cell_id, chr, start, end, hap_label), .SDcols = c("allele1", "allele0")] %>%
+    .[, totalcounts := allele1 + allele0]
+  
+  if (is.null(library)){
+    library <- "library"
+  }
+  
+  if (is.null(library)){
+    sample <- "sample"
+  }
+  
+  chiselhaplotypes$cell_id <- unlist(lapply(chiselhaplotypes$cell_id, function(x) paste(sample, library, x, sep = "-")))
+  
+  return(chiselhaplotypes)
+}
