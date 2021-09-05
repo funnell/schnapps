@@ -46,33 +46,33 @@ createCNmatrix <- function(CNbins,
   }
 
   if (fillnaplot == TRUE) {
-    
+
     colnames <- names(cnmatrix)
     colnames <- colnames[!colnames %in% c("chr", "start", "end", "idx", "width")]
-    
+
     #count proportion of rows that have NA values
     narows <- cnmatrix[, ..colnames]
     narows <- apply(narows, 1, function(x) sum(is.na(x))) / length(colnames)
     #remove the largest region of consecutive NA's, this will the centromere in most chroms
-    narowsdf <- cnmatrix[, 1:4] %>% 
-      dplyr::mutate(id = 1:dplyr::n()) %>% 
-      dplyr::mutate(isna = narows) %>% 
-      dplyr::mutate(runid = rleid(isna > 0.9)) %>% 
-      dplyr::add_count(runid) %>% 
-      dplyr::group_by(chr) %>% 
-      dplyr::mutate(maxn = max(n)) %>% 
-      dplyr::ungroup() %>% 
+    narowsdf <- cnmatrix[, 1:4] %>%
+      dplyr::mutate(id = 1:dplyr::n()) %>%
+      dplyr::mutate(isna = narows) %>%
+      dplyr::mutate(runid = rleid(isna > 0.9)) %>%
+      dplyr::add_count(runid) %>%
+      dplyr::group_by(chr) %>%
+      dplyr::mutate(maxn = max(n)) %>%
+      dplyr::ungroup() %>%
       dplyr::filter(isna & n == maxn & n > 9)
-    
+
     cnmatrix <- cnmatrix %>%
       dplyr::as_tibble() %>%
       tidyr::fill(., colnames, .direction = "downup")
   }
-  
+
   if (fillna == TRUE) {
     colnames <- names(cnmatrix)
     colnames <- colnames[!colnames %in% c("chr", "start", "end", "idx", "width")]
-    
+
     cnmatrix <- cnmatrix %>%
       dplyr::as_tibble() %>%
       tidyr::fill(., colnames, .direction = "updown")
@@ -434,7 +434,7 @@ create_segments <- function(CNbins, field = "state") {
 
 #' @export
 create_cntransitions <- function(CNbins, field = "state", add_orientation = TRUE) {
-  
+
   newsegs <- CNbins %>%
     data.table::as.data.table() %>%
     .[order(cell_id, chr, start)] %>%
@@ -444,13 +444,13 @@ create_cntransitions <- function(CNbins, field = "state", add_orientation = TRUE
       end = min(start) + 0.5e6 - 1
     ), by = .(cell_id, chr, get(field), rlid)] %>%
     .[order(cell_id, chr, start)] %>%
-    dplyr::group_by(cell_id, chr) %>% 
-    dplyr::mutate(rown = dplyr::row_number()) %>% 
+    dplyr::group_by(cell_id, chr) %>%
+    dplyr::mutate(rown = dplyr::row_number()) %>%
     dplyr::filter(rown != 1) %>% #filter out first row, count the transition as the bin of the second segment
     dplyr::select(cell_id, chr, start, end, dplyr::everything(), -rlid, -rown) %>%
     as.data.frame()
   setnames(newsegs, "get", field)
-  
+
   if (add_orientation){
     newsegs <- CNbins %>%
       data.table::as.data.table() %>%
@@ -461,15 +461,15 @@ create_cntransitions <- function(CNbins, field = "state", add_orientation = TRUE
         end = min(start) + 0.5e6 - 1
       ), by = .(cell_id, chr, state, rlid)] %>%
       .[order(cell_id, chr, start)] %>%
-      dplyr::group_by(cell_id, chr) %>% 
-      dplyr::mutate(rown = dplyr::row_number()) %>% 
-      dplyr::mutate(state_diff = state - lag(state)) %>% 
+      dplyr::group_by(cell_id, chr) %>%
+      dplyr::mutate(rown = dplyr::row_number()) %>%
+      dplyr::mutate(state_diff = state - lag(state)) %>%
       dplyr::filter(rown != 1) %>% #filter out first row, count the transition as the bin of the second segment
-      dplyr::mutate(orientation = ifelse(state_diff > 0, "-", "+")) %>% 
+      dplyr::mutate(orientation = ifelse(state_diff > 0, "-", "+")) %>%
       dplyr::select(cell_id, chr, start, end, dplyr::everything(), -rlid, -rown) %>%
       as.data.frame()
   }
-  
+
   return(newsegs)
 }
 
@@ -527,13 +527,13 @@ qc_summary <- function(cn) {
 
 #' @export
 qc_per_cell <- function(cn){
-  
+
   if (is.hscn(cn) | is.ascn(cn)) {
     cn <- cn$data
   } else {
     cn <- cn
   }
-  
+
   qc <- cn %>%
     dplyr::filter(state_AS_phased != "0|0") %>%
     dplyr::group_by(state_AS_phased, Min, Maj, cell_id) %>%
@@ -552,21 +552,21 @@ qc_per_cell <- function(cn){
     dplyr::ungroup() %>%
     dplyr::mutate(expBAF = Min / (Min + Maj)) %>%
     dplyr::mutate(distance = sqrt((expBAF - medianBAF)^2)) %>%
-    dplyr::group_by(cell_id) %>% 
-    dplyr::summarize(average_distance = weighted.mean(distance, frac)) %>% 
+    dplyr::group_by(cell_id) %>%
+    dplyr::summarize(average_distance = weighted.mean(distance, frac)) %>%
     as.data.frame(.)
-  
-  pl <- cn %>% as.data.table() %>% .[!chr %in% c("X", "Y"), 
-                                     list(ploidy = Mode(state), totalhapcounts = sum(totalcounts)), 
+
+  pl <- cn %>% as.data.table() %>% .[!chr %in% c("X", "Y"),
+                                     list(ploidy = Mode(state), totalhapcounts = sum(totalcounts)),
                                      by = "cell_id"]
-  
-  nsegs <- create_segments(cn) %>% 
-    dplyr::filter(!chr %in% c("X", "Y")) %>% 
-    dplyr::group_by(cell_id) %>% 
+
+  nsegs <- create_segments(cn) %>%
+    dplyr::filter(!chr %in% c("X", "Y")) %>%
+    dplyr::group_by(cell_id) %>%
     dplyr::summarize(nsegments = dplyr::n() - 22)
-  
-  qc <- dplyr::left_join(qc, pl, by = "cell_id") %>% 
-    dplyr::left_join(., nsegs, by = "cell_id") %>% 
+
+  qc <- dplyr::left_join(qc, pl, by = "cell_id") %>%
+    dplyr::left_join(., nsegs, by = "cell_id") %>%
     as.data.frame()
   return(qc)
 }
@@ -727,12 +727,12 @@ per_chrarm_cn <- function(hscn, arms = NULL) {
         .[, BAF := alleleB / totalcounts] %>%
         .[, Min := state - Maj]
     }
-  
+
     hscn_arm <- hscn_arm %>%
       add_states() %>%
       dplyr::left_join(hg19chrom_coordinates) %>%
       dplyr::mutate(state = ifelse(state > 11, 11, state))
-    
+
   } else {
     if (is.null(arms)) {
       hscn_arm <- hscn %>%
@@ -759,9 +759,9 @@ per_chrarm_cn <- function(hscn, arms = NULL) {
           copy = as.double(median(copy, na.rm = TRUE)),
           state_sd = sd(state, na.rm = TRUE),
           proportion = sum(state == Mode(state)) / .N
-        ), by = c("chr", "arm", "chrarm", "cell_id")] 
+        ), by = c("chr", "arm", "chrarm", "cell_id")]
     }
-    
+
     hscn_arm <- hscn_arm %>%
       dplyr::left_join(hg19chrom_coordinates) %>%
       dplyr::mutate(state = ifelse(state > 11, 11, state))
@@ -773,7 +773,7 @@ per_chrarm_cn <- function(hscn, arms = NULL) {
 #' @export
 per_chr_cn <- function(hscn, arms = NULL) {
   data("hg19chrom_coordinates", envir = environment())
-  
+
   if ("state_phase" %in% colnames(hscn)){
 
     hscn_chr <- hscn %>%
@@ -960,10 +960,10 @@ BAFdistance <- function(cn) {
 }
 
 #' @export
-filtercn <- function(cn, 
-                     average_distance_filt = 0.1, 
-                     ploidy_filt = NULL, 
-                     totalhapcounts_filt = 0, 
+filtercn <- function(cn,
+                     average_distance_filt = 0.1,
+                     ploidy_filt = NULL,
+                     totalhapcounts_filt = 0,
                      nsegments_filt = 0){
   qcnew <- dplyr::filter(cn$qc_per_cell, average_distance <= average_distance_filt,
                              totalhapcounts >= totalhapcounts_filt,
@@ -971,76 +971,76 @@ filtercn <- function(cn,
   if (!is.null(ploidy_filt)){
     qcnew <- dplyr::filter(qcnew, ploidy == ploidy_filt)
   }
-  
+
   cells <- qcnew$cell_id
-  cn$data <- cn$data %>% 
+  cn$data <- cn$data %>%
     dplyr::filter(cell_id %in% cells)
   cn$qc_summary <- qc_summary(cn)
   cn$qc_per_cell <- qcnew
-  
+
   return(cn)
 }
 
 #' @export
 filterbycells <- function(cn, cells){
-  cn$data <- cn$data %>% 
+  cn$data <- cn$data %>%
     dplyr::filter(cell_id %in% cells)
-  cn$qc_per_cell <- cn$qc_per_cell %>% 
+  cn$qc_per_cell <- cn$qc_per_cell %>%
     dplyr::filter(cell_id %in% cells)
   cn$qc_summary <- qc_summary(cn)
-  
+
   return(cn)
 }
 
 #' @export
 convertchiselcalls <- function(chisel, mirrorbaf = FALSE, library = NULL, sample = NULL){
-  
+
   chisel$chr <- as.character(chisel$chr)
-  
+
   #split the HAP_CN column to get the Maj and Min states and add the states in schnapps format
-  chisel <- chisel %>% 
-    dplyr::rename(chr = `#CHR`, start = START, end = END, cell_id = CELL, alleleA = A_COUNT, alleleB = B_COUNT, rdr = RDR) %>% 
-    tidyr::separate(CORRECTED_HAP_CN, c("Maj", "Min"), sep="([a|b])", convert = TRUE) %>% 
-    dplyr::mutate(start = start + 1, state = Maj + Min) %>% 
-    dplyr::select(-CLUSTER, -HAP_CN, -NORM_COUNT, -COUNT) %>% 
+  chisel <- chisel %>%
+    dplyr::rename(chr = `#CHR`, start = START, end = END, cell_id = CELL, alleleA = A_COUNT, alleleB = B_COUNT, rdr = RDR) %>%
+    tidyr::separate(CORRECTED_HAP_CN, c("Maj", "Min"), sep="([a|b])", convert = TRUE) %>%
+    dplyr::mutate(start = start + 1, state = Maj + Min) %>%
+    dplyr::select(-CLUSTER, -HAP_CN, -NORM_COUNT, -COUNT) %>%
     add_states(.)
-  
+
   #calculate cell ploidy and convert rdr to corrected read counts: "copy"
-  chisel <- chisel %>% 
-    dplyr::group_by(cell_id) %>% 
+  chisel <- chisel %>%
+    dplyr::group_by(cell_id) %>%
     dplyr::mutate(copy = rdr * 2) %>%
-    dplyr::mutate(pl = max(Mode(state), 2)) %>% 
+    dplyr::mutate(pl = max(Mode(state), 2)) %>%
     dplyr::mutate(copy = as.double(copy * (pl / 2))) %>%
-    dplyr::ungroup() %>% 
+    dplyr::ungroup() %>%
     dplyr::select(-pl)
-  
-  #mirror the BAF 
+
+  #mirror the BAF
   if (mirrorbaf){
     chisel <- chisel %>%
       dplyr::mutate(mBAF = BAF) %>%
-      dplyr::mutate( BAF = 
+      dplyr::mutate( BAF =
                   dplyr::case_when(
-                  alleleA > alleleB & Maj < Min ~ (1-BAF), 
-                  alleleA > alleleB & Maj > Min ~ BAF, 
-                  alleleA < alleleB & Maj > Min ~ (1-BAF), 
-                  alleleA < alleleB & Maj < Min ~ BAF, 
-                  Maj == Min ~ BAF, 
-                  alleleA == alleleB ~ BAF, 
+                  alleleA > alleleB & Maj < Min ~ (1-BAF),
+                  alleleA > alleleB & Maj > Min ~ BAF,
+                  alleleA < alleleB & Maj > Min ~ (1-BAF),
+                  alleleA < alleleB & Maj < Min ~ BAF,
+                  Maj == Min ~ BAF,
+                  alleleA == alleleB ~ BAF,
                   TRUE ~ BAF
-                ) 
+                )
       )
   }
-  
+
   if (is.null(library)){
     library <- "library"
   }
-  
+
   if (is.null(library)){
     sample <- "sample"
   }
-  
+
   chisel$cell_id <- unlist(lapply(chisel$cell_id, function(x) paste(sample, library, x, sep = "-")))
-  
+
   return(chisel)
 }
 
@@ -1049,30 +1049,30 @@ convertchiselhaplotypes <- function(chiselhaplotypes, hapbinsize = 50e3, cnbinsi
   colnames(chiselhaplotypes) <- c("chr", "pos", "cell_id", "allele0", "allele1")
   chiselhaplotypes$chr <- as.character(chiselhaplotypes$chr)
   chiselhaplotypes$pos2 <- chiselhaplotypes$pos
-  
-  bins <- getBins(binsize = binsize) %>% 
-    dplyr::rename(start_bins = start, end_bins = end, chr_bins = chr) %>% 
-    dplyr::select(-width) %>% 
-    as.data.table() %>% 
-    .[, hap_label := 1:.N] 
-  
+
+  bins <- getBins(binsize = hapbinsize) %>%
+    dplyr::rename(start_bins = start, end_bins = end, chr_bins = chr) %>%
+    dplyr::select(-width) %>%
+    as.data.table() %>%
+    .[, hap_label := 1:.N]
+
   chiselhaplotypes <- chiselhaplotypes[bins, on = .(chr == chr_bins, pos > start_bins, pos < end_bins)]
   chiselhaplotypes <- na.omit(chiselhaplotypes)
-  
+
   chiselhaplotypes <-  chiselhaplotypes[, start := floor(pos / cnbinsize) * cnbinsize + 1] %>%
     .[, end := start + cnbinsize - 1] %>%
     .[, lapply(.SD, sum), by = .(cell_id, chr, start, end, hap_label), .SDcols = c("allele1", "allele0")] %>%
     .[, totalcounts := allele1 + allele0]
-  
+
   if (is.null(library)){
     library <- "library"
   }
-  
+
   if (is.null(library)){
     sample <- "sample"
   }
-  
+
   chiselhaplotypes$cell_id <- unlist(lapply(chiselhaplotypes$cell_id, function(x) paste(sample, library, x, sep = "-")))
-  
+
   return(chiselhaplotypes)
 }
