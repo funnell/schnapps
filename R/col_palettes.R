@@ -57,10 +57,10 @@ scCNminorallele_colors <- c(
 )
 
 scCNphase_colors <- c(
-  `A-Hom` = "#025767",
-  `B-Hom` = "#A75200",
-  `A-Gained` = "#53AFC0",
-  `B-Gained` = "#FF9E41",
+  `A-Hom` = "#56941E",
+  `B-Hom` = "#471871",
+  `A-Gained` = "#94C773",
+  `B-Gained` = "#7B52AE",
   `Balanced` = "#d5d5d4"
 )
 

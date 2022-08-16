@@ -328,111 +328,132 @@ get_label <- function(cell_id, idx, str_to_remove){
   return(lab)
 }
 
-get_library_labels <- function(cell_ids, idx = 1, str_to_remove = NULL) {
-  labels <- sapply(cell_ids, function(x) {
-    return(get_label(x, idx, str_to_remove))
-  })
+get_library_labels <- function(cell_ids,
+                               library_mapping,
+                               idx = 1,
+                               str_to_remove = NULL) {
+
+  labels <- purrr::map_chr(cell_ids, get_label, idx, str_to_remove)
+
+  if (!is.null(library_mapping)) {
+    library_labels <- unlist(library_mapping[library_labels])
+
+    if (!all(library_labels %in% names(library_mapping))) {
+      warning(paste(
+        "Not all library ids present in library to name mapping, using library",
+        "IDs as annotations..."
+      ))
+      library_labels <- get_library_labels(rownames(copynumber))
+    }
+  }
+
   return(labels)
+}
+
+make_clone_annot_pal <- function(clones) {
+  clone_pal <- clones$clone_label %>%
+    unique() %>%
+    purrr::discard(~ grepl("None", .)) %>%
+    gtools::mixedsort() %>%
+    make_clone_palette()
+
+  clone_none <- clones$clone_label %>%
+    unique() %>%
+    purrr::keep(~ grepl("None", .))
+  if (length(clone_none) > 0) {
+    clone_pal[[clone_none]] <- clone_none_black
+  }
+
+  return(clone_pal)
+}
+
+get_library_annot_colours <- function(library_labels) {
+  library_levels <- gtools::mixedsort(unique(library_labels))
+  annot_colours <- make_discrete_palette("Set2", library_levels)
+  annot_colours <- annot_colours[!is.na(annot_colours)]
+  return(annot_colours)
 }
 
 make_left_annot <- function(copynumber,
                             clones,
                             library_mapping = NULL,
-                            show_library_label = TRUE,
+                            show_library_annot = TRUE,
+                            show_clone_annot = TRUE,
                             show_clone_label = TRUE,
+                            show_annot_names = TRUE,
                             clone_pal = NULL,
                             idx = 1,
                             show_legend = TRUE,
-                            str_to_remove = NULL) {
-  annot_colours <- list()
+                            str_to_remove = NULL,
+                            annofontsize = 14) {
 
-  if (show_clone_label == FALSE & show_library_label == FALSE) {
+  if (show_clone_annot == FALSE && show_library_annot == FALSE) {
     return(NULL)
   }
 
-  library_labels <- get_library_labels(rownames(copynumber), idx = idx, str_to_remove = str_to_remove)
-  if (!is.null(library_mapping)) {
-    library_labels <- unlist(library_mapping[library_labels])
-    if (!all(library_labels %in% names(library_mapping)) == FALSE) {
-      warning("Not all library ids present in library to name mapping, using library IDs as annotations...")
-      library_labels <- get_library_labels(rownames(copynumber))
-    }
-  }
-  library_levels <- gtools::mixedsort(unique(library_labels))
-  annot_colours$Sample <- make_discrete_palette("Set2", library_levels)
-  annot_colours$Sample <- annot_colours$Sample[!is.na(annot_colours$Sample)]
+  annot_params <- list()
+  annot_colours <- list()
+  show_annot_names_ <- c()
+  annot_legend_params <- list()
+  annot_widths <- c()
 
-  library_legend_rows <- 3
+  if (!is.null(clones) && show_clone_annot) {
+    annot_params$Clone <- clones$clone_label
 
-  if (!is.null(clones)) {
-    clone_levels <- unique(clones$clone_label)
-    clone_level_none <- clone_levels[grepl("None", clone_levels)]
-    clone_levels <- gtools::mixedsort(clone_levels[!grepl("None", clone_levels)])
     if (is.null(clone_pal)) {
-      clone_pal <- make_clone_palette(clone_levels)
+      clone_pal <- make_clone_annot_pal(clones)
     }
-
-    if (length(clone_level_none > 0)) {
-      clone_pal[[clone_level_none]] <- clone_none_black
-    }
-    annot_colours$Cluster <- clone_pal
-
-    clone_label_generator <- function(index) {
-      clone_label_pos <- get_clone_label_pos(clones)
-      y_pos <- 1 - unlist(clone_label_pos) / nrow(clones)
-      grid::grid.text(
-        names(clone_label_pos), 0.5, y_pos,
-        just = c("centre", "centre")
-      )
-    }
+    annot_colours$Clone <- clone_pal
+    show_annot_names_ <- c(show_annot_names_, TRUE && show_annot_names)
+    annot_widths <- c(annot_widths, 0.15)
 
     clone_legend_rows <- 3
-    if (length(clone_levels) > 3) {
-      clone_legend_rows <- round(sqrt(length(clone_levels) * 2))
+    n_clones <- dplyr::n_distinct(annot_params$Clone)
+    if (n_clones > 3) {
+      clone_legend_rows <- round(sqrt(n_clones * 2))
     }
-
-    if (show_library_label == TRUE & show_clone_label == TRUE) {
-      left_annot <- ComplexHeatmap::HeatmapAnnotation(
-        Cluster = clones$clone_label, clone_label = clone_label_generator,
-        Sample = library_labels,
-        col = annot_colours, show_annotation_name = c(TRUE, FALSE, TRUE),
-        which = "row", annotation_width = grid::unit(rep(0.4, 3), "cm"),
-        annotation_legend_param = list(
-          Cluster = list(nrow = clone_legend_rows, direction = "horizontal"),
-          Sample = list(nrow = library_legend_rows, direction = "horizontal")
-        ),
-        show_legend = show_legend
-      )
-    } else if (show_library_label == FALSE & show_clone_label == TRUE) {
-      left_annot <- ComplexHeatmap::HeatmapAnnotation(
-        Cluster = clones$clone_label, clone_label = clone_label_generator,
-        col = annot_colours, show_annotation_name = c(TRUE, FALSE),
-        which = "row", annotation_width = grid::unit(rep(0.4, 2), "cm"),
-        annotation_legend_param = list(
-          Cluster = list(nrow = clone_legend_rows)
-        ),
-        show_legend = show_legend
-      )
-    } else if (show_library_label == TRUE & show_clone_label == FALSE) {
-      left_annot <- ComplexHeatmap::HeatmapAnnotation(
-        Sample = library_labels, col = annot_colours,
-        which = "row", simple_anno_size = grid::unit(0.4, "cm"),
-        annotation_legend_param = list(
-          Sample = list(nrow = library_legend_rows)
-        ),
-        show_legend = show_legend
-      )
-    }
-  } else {
-    left_annot <- ComplexHeatmap::HeatmapAnnotation(
-      Sample = library_labels, col = annot_colours,
-      which = "row", simple_anno_size = grid::unit(0.4, "cm"),
-      annotation_legend_param = list(
-        Sample = list(nrow = library_legend_rows)
-      ),
-      show_legend = show_legend
+    annot_legend_params$Clone <- list(
+      nrow = clone_legend_rows, direction = "horizontal"
     )
+
+    if (show_clone_label) {
+      annot_params$clone_label <- function(index) {
+        clone_label_pos <- get_clone_label_pos(clones)
+        y_pos <- 1 - unlist(clone_label_pos) / nrow(clones)
+        grid::grid.text(
+          names(clone_label_pos), 0.5, y_pos,
+          just = c("centre", "centre"),
+          gp = gpar(fontsize = annofontsize + 1)
+        )
+      }
+      show_annot_names_ <- c(show_annot_names_, FALSE)
+      annot_widths <- c(annot_widths, 0.3)
+    }
   }
+
+  if (show_library_annot) {
+    annot_params$Sample <- get_library_labels(
+      rownames(copynumber), library_mapping, idx = idx,
+      str_to_remove = str_to_remove
+    )
+    annot_colours$Sample <- get_library_annot_colours(annot_params$Sample)
+    show_annot_names_ <- c(show_annot_names_, TRUE && show_annot_names)
+    annot_widths <- c(annot_widths, 0.15)
+    annot_legend_params$Sample <- list(nrow = 3, direction = "horizontal")
+  }
+
+  left_annot <- rlang::exec(
+    ComplexHeatmap::HeatmapAnnotation,
+    !!!annot_params,
+    col = annot_colours,
+    show_annotation_name = show_annot_names_,
+    annotation_legend_param = annot_legend_params,
+    annotation_width = grid::unit(annot_widths, "cm"),
+    simple_anno_size = unit(0.15, "cm"),
+    which = "row",
+    annotation_name_gp = gpar(fontsize = annofontsize),
+    show_legend = show_legend
+  )
 
   return(left_annot)
 }
@@ -511,6 +532,7 @@ make_bottom_annot <- function(copynumber,
     bottom_annot <- ComplexHeatmap::HeatmapAnnotation(chrom_labels = ComplexHeatmap::anno_mark(
       at = as.vector(unlist(chrom_label_pos)),
       labels = names(chrom_label_pos),
+      link_height = grid::unit(linkheight, "mm"),
       side = "bottom",
       labels_gp = grid::gpar(fontsize = annofontsize),
       padding = unit(1.25, "mm"), extend = 0.01, labels_rot = 0
@@ -523,14 +545,32 @@ make_bottom_annot <- function(copynumber,
 make_top_annotation_gain <- function(copynumber,
                                      plotcol = "state",
                                      plotfrequency = FALSE,
+                                     ploidies = NULL,
                                      cutoff = NULL,
                                      maxf = NULL,
-                                     SV = NULL) {
+                                     SV = NULL,
+                                     annofontsize = 14) {
   ncells <- nrow(copynumber)
 
   if ((plotcol == "state" | plotcol == "copy") & plotfrequency == TRUE) {
-    f1 <- colSums(copynumber > cutoff, na.rm = TRUE) / ncells
-    f2 <- -colSums(copynumber < cutoff, na.rm = TRUE) / ncells
+
+    if (!is.null(ploidies)) {
+      ploidies <- as.data.frame(ploidies, stringsAsFactors = FALSE)
+      rownames(ploidies) <- ploidies$cell_id
+      cell_ploidies <- ploidies[rownames(copynumber), ]$ploidy
+
+      rel_copynumber <- apply(copynumber, c(1, 2), function(x) {
+          as.integer(gsub("\\+", "", x))
+      })
+      rel_copynumber <- rel_copynumber - cell_ploidies
+
+      f1 <- colSums(rel_copynumber > 0, na.rm = TRUE) / ncells
+      f2 <- -colSums(rel_copynumber < 0, na.rm = TRUE) / ncells
+    } else {
+      f1 <- colSums(copynumber > cutoff, na.rm = TRUE) / ncells
+      f2 <- -colSums(copynumber < cutoff, na.rm = TRUE) / ncells
+    }
+
     if (is.null(maxf)) {
       maxf <- ceiling(max(max(f1, max(abs(f2)))) / 0.1) * 0.1
       if (maxf < 0.01) {
@@ -543,10 +583,13 @@ make_top_annotation_gain <- function(copynumber,
         bar_width = 1,
         gp = grid::gpar(col = "#E34A33", fill = "#E34A33"),
         axis_param = list(
-          at = c(round(maxf / 2, 2), maxf),
-          labels = c(paste0(round(maxf / 2, 2)), paste0(maxf))
+          ## at = c(round(maxf / 2, 2), maxf),
+          ## labels = c(paste0(round(maxf / 2, 2)), paste0(maxf))
+          at = c(0.5, 1),
+          labels = c("", "1"),
+          gp = gpar(fontsize = annofontsize)
         ),
-        ylim = c(0, maxf),
+        ylim = c(0, 1),
         border = FALSE,
       ),
       dist3 = ComplexHeatmap::anno_barplot(
@@ -554,15 +597,24 @@ make_top_annotation_gain <- function(copynumber,
         bar_width = 1,
         gp = grid::gpar(col = "#3182BD", fill = "#3182BD"),
         axis_param = list(
-          at = c(0.0, -round(maxf / 2, 2), -maxf),
-          labels = c("0", paste0(round(maxf / 2, 2)), paste0(maxf))
+          ## at = c(0.0, -round(maxf / 2, 2), -maxf),
+          ## labels = c("0", paste0(round(maxf / 2, 2)), paste0(maxf))
+          at = c(0, -0.5, -1),
+          labels = c("0", "", "-1"),
+          gp = gpar(fontsize = annofontsize)
         ),
-        ylim = c(-maxf, 0),
+        ## ylim = c(-maxf, 0),
+        ylim = c(-1, 0),
         border = FALSE,
       ),
-      show_annotation_name = FALSE,
-      height = grid::unit(1.4, "cm")
+      ## show_annotation_name = FALSE,
+      annotation_label = c("", ""),
+      annotation_name_gp = gpar(fontsize = annofontsize),
+      show_annotation_name = TRUE,
+      ## height = grid::unit(1.4, "cm")
+      height = grid::unit(0.5, "cm")
     )
+    ha2@anno_list[[1]]@label <- expression(atop("", Delta))
   } else if (plotcol == "state_phase" & plotfrequency == TRUE) {
     f1a <- colSums(apply(copynumber, 2, function(x) grepl("A-Gained", x))) / ncells
     f1b <- colSums(apply(copynumber, 2, function(x) grepl("A-Hom", x))) / ncells
@@ -683,9 +735,12 @@ make_copynumber_heatmap <- function(copynumber,
                                     maxf = 1.0,
                                     plotcol = "state",
                                     plotfrequency = FALSE,
+                                    ploidies = NULL,
                                     show_legend = TRUE,
-                                    show_library_label = TRUE,
+                                    show_library_annot = TRUE,
+                                    show_clone_annot = TRUE,
                                     show_clone_label = TRUE,
+                                    show_annot_names = TRUE,
                                     chrlabels = TRUE,
                                     SV = NULL,
                                     nticks = 4,
@@ -694,6 +749,8 @@ make_copynumber_heatmap <- function(copynumber,
                                     na_col = "white",
                                     linkheight = 5,
                                     str_to_remove = NULL,
+                                    use_raster = TRUE,
+                                    raster_quality = 10,
                                     ...) {
   
   if (class(colvals) == "function"){
@@ -714,19 +771,40 @@ make_copynumber_heatmap <- function(copynumber,
     cluster_rows = FALSE,
     cluster_columns = FALSE,
     show_column_names = FALSE,
-    bottom_annotation = make_bottom_annot(copynumber, chrlabels = chrlabels, nticks = nticks, annotation_height = annotation_height, annofontsize = annofontsize, linkheight = linkheight),
-    left_annotation = make_left_annot(copynumber, clones,
-      library_mapping = library_mapping, clone_pal = clone_pal, show_clone_label = show_clone_label,
-      idx = sample_label_idx, show_legend = show_legend, show_library_label = show_library_label,
-      str_to_remove = str_to_remove
+    bottom_annotation = make_bottom_annot(
+      copynumber,
+      chrlabels = chrlabels,
+      nticks = nticks,
+      annotation_height = annotation_height,
+      annofontsize = annofontsize,
+      linkheight = linkheight
+    ),
+    left_annotation = make_left_annot(
+      copynumber, clones,
+      library_mapping = library_mapping,
+      clone_pal = clone_pal,
+      show_library_annot = show_library_annot,
+      show_clone_annot = show_clone_annot,
+      show_clone_label = show_clone_label,
+      show_annot_names = show_annot_names,
+      idx = sample_label_idx,
+      show_legend = show_legend,
+      str_to_remove = str_to_remove,
+      annofontsize = annofontsize
     ),
     heatmap_legend_param = leg_params,
-    top_annotation = make_top_annotation_gain(copynumber,
-      cutoff = cutoff, maxf = maxf,
-      plotfrequency = plotfrequency, plotcol = plotcol, SV = SV
+    top_annotation = make_top_annotation_gain(
+      copynumber,
+      cutoff = cutoff,
+      maxf = maxf,
+      plotfrequency = plotfrequency,
+      ploidies = ploidies,
+      plotcol = plotcol,
+      SV = SV,
+      annofontsize = annofontsize
     ),
-    use_raster = TRUE,
-    raster_quality = 10,
+    use_raster = use_raster,
+    raster_quality = raster_quality,
     ...
   )
   return(copynumber_hm)
@@ -766,8 +844,9 @@ getSVlegend <- function(include = NULL) {
 #' @param maxf Max frequency when plotting the frequency track, default = NULL infers this from the data
 #' @param plotfrequency Plot the frequency track of gains and losses across the genome
 #' @param show_legend plot legend or not, boolean
-#' @param show_library_label show library label or not, boolean
-#' @param show_clone_label show clone label or not, boolean
+#' @param show_library_annot show library annotation or not, boolean
+#' @param show_clone_annot show clone annotation or not, boolean
+#' @param show_clone_label show clone text label or not, boolean
 #' @param umapmetric metric to use in umap dimensionality reduction if no clusters are specified
 #' @param chrlabels include chromosome labels or not, boolean
 #' @param SV sv data frame
@@ -808,9 +887,12 @@ plotHeatmap <- function(cn,
                         frequencycutoff = 2,
                         maxf = NULL,
                         plotfrequency = FALSE,
+                        ploidies = NULL,
                         show_legend = TRUE,
-                        show_library_label = TRUE,
+                        show_library_annot = TRUE,
+                        show_clone_annot = TRUE,
                         show_clone_label = TRUE,
+                        show_annot_names = TRUE,
                         widenarm = FALSE,
                         umapmetric = "euclidean",
                         chrlabels = TRUE,
@@ -929,7 +1011,9 @@ plotHeatmap <- function(cn,
       seed = seed
     )
     tree <- clustering_results$tree
-    tree_ggplot <- make_tree_ggplot(tree, as.data.frame(clustering_results$clusters), clone_pal = clone_pal)
+    tree_ggplot <- make_tree_ggplot(
+      tree, as.data.frame(clustering_results$clusters), clone_pal = clone_pal
+    )
     tree_plot_dat <- tree_ggplot$data
     message("Creating tree...")
     tree_hm <- make_corrupt_tree_heatmap(tree_ggplot)
@@ -960,7 +1044,9 @@ plotHeatmap <- function(cn,
       tree <- format_tree(tree, branch_length)
     }
 
-    tree_ggplot <- make_tree_ggplot(tree, as.data.frame(clusters), clone_pal = clone_pal)
+    tree_ggplot <- make_tree_ggplot(
+      tree, as.data.frame(clusters), clone_pal = clone_pal
+    )
     tree_plot_dat <- tree_ggplot$data
 
     message("Creating tree...")
@@ -978,7 +1064,9 @@ plotHeatmap <- function(cn,
         tree <- format_tree(tree, branch_length)
       }
 
-      tree_ggplot <- make_tree_ggplot(tree, as.data.frame(clusters), clone_pal = clone_pal)
+      tree_ggplot <- make_tree_ggplot(
+        tree, as.data.frame(clusters), clone_pal = clone_pal
+      )
       tree_plot_dat <- tree_ggplot$data
 
       message("Creating tree...")
@@ -1025,9 +1113,12 @@ plotHeatmap <- function(cn,
     maxf = maxf,
     plotcol = plotcol,
     plotfrequency = plotfrequency,
+    ploidies = ploidies,
     show_legend = show_legend,
-    show_library_label = show_library_label,
+    show_library_annot = show_library_annot,
+    show_clone_annot = show_clone_annot,
     show_clone_label = show_clone_label,
+    show_annot_names = show_annot_names,
     chrlabels = chrlabels,
     SV = SV,
     nticks = nticks,
@@ -1083,7 +1174,8 @@ plotSNVHeatmap <- function(SNVs,
                            clone_pal = NULL,
                            show_legend = TRUE,
                            library_mapping = NULL,
-                           show_library_label = TRUE,
+                           show_library_annot = TRUE,
+                           show_clone_annot = TRUE,
                            show_clone_label = TRUE,
                            plottree = TRUE,
                            mymaxcol = "firebrick4",
@@ -1127,9 +1219,15 @@ plotSNVHeatmap <- function(SNVs,
     cluster_columns = clustercols,
     show_column_names = FALSE,
     # bottom_annotation=make_bottom_annot(copynumber),
-    left_annotation = make_left_annot(muts, clones_formatted,
-      library_mapping = library_mapping, clone_pal = clone_pal, show_clone_label = show_clone_label,
-      idx = sample_label_idx, show_legend = show_legend, show_library_label = show_library_label,
+    left_annotation = make_left_annot(
+      muts, clones_formatted,
+      library_mapping = library_mapping,
+      clone_pal = clone_pal,
+      show_clone_annot = show_clone_annot,
+      show_clone_label = show_clone_label,
+      idx = sample_label_idx,
+      show_legend = show_legend,
+      show_library_annot = show_library_annot,
       str_to_remove = strstr_to_remove
     ),
     use_raster = TRUE,
